@@ -76,7 +76,7 @@ export default function App() {
   const [storeItems, setStoreItems] = useState([]); 
   const [transactions, setTransactions] = useState([]);
   const [inviteCodes, setInviteCodes] = useState([]); 
-  const [adminUsers, setAdminUsers] = useState([]); // 新增：管理员查看的用户列表
+  const [adminUsers, setAdminUsers] = useState([]); 
   const [isLoadingCloud, setIsLoadingCloud] = useState(false);
   
   const [showAddModal, setShowAddModal] = useState(false);
@@ -89,7 +89,7 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
-  const [showForgotModal, setShowForgotModal] = useState(false); // 新增：忘记密码弹窗
+  const [showForgotModal, setShowForgotModal] = useState(false);
   
   // Auth Form State
   const [authForm, setAuthForm] = useState({ username: '', password: '', nickname: '', inviteCode: '', newPassword: '' });
@@ -132,6 +132,37 @@ export default function App() {
     }
   }, [loggedInUser]);
 
+  // --- 核心：定期检查用户状态 ---
+  useEffect(() => {
+    if (!loggedInUser) return;
+
+    const checkUserStatus = async () => {
+      try {
+        // 请求后端检查用户是否存在
+        const res = await fetch(`/api/auth/check?id=${loggedInUser.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          // 如果用户无效 (被删除)，则强制退出
+          if (!data.valid) {
+            setLoggedInUser(null);
+            setShowStoreModal(false); // 如果正在商店，关闭它
+            setShowProfileModal(false);
+            showToast("您的账号已被管理员注销 🚫");
+          }
+        }
+      } catch (e) {
+        console.error("Session check failed", e);
+      }
+    };
+
+    // 立即检查一次
+    checkUserStatus();
+
+    // 每 5 秒轮询一次，确保被删除后能较快反应
+    const intervalId = setInterval(checkUserStatus, 5000);
+    return () => clearInterval(intervalId);
+  }, [loggedInUser]);
+
   useEffect(() => {
     try {
       localStorage.setItem('spark-habits', JSON.stringify(habits));
@@ -155,11 +186,9 @@ export default function App() {
       if (transRes.ok) setTransactions(await transRes.json());
       
       if (isAdmin) {
-        // 获取邀请码
         const codesRes = await fetch('/api/codes', { cache: 'no-store' });
         if (codesRes.ok) setInviteCodes(await codesRes.json());
         
-        // 获取用户列表 (新增)
         const usersRes = await fetch('/api/admin/users', { cache: 'no-store' });
         if (usersRes.ok) setAdminUsers(await usersRes.json());
       }
@@ -230,7 +259,6 @@ export default function App() {
         showToast("登录成功！👋");
         setAuthForm({ username: '', password: '', nickname: '', inviteCode: '', newPassword: '' });
       } else {
-        // 登录失败提示 (满足需求 5)
         showToast(data.error || "用户名或密码错误 🚫");
       }
     } catch (e) {
@@ -238,7 +266,6 @@ export default function App() {
     }
   };
   
-  // 新增：处理找回密码
   const handleResetPassword = async () => {
     if (!authForm.username || !authForm.inviteCode || !authForm.newPassword) {
       showToast("请填写所有信息");
@@ -301,14 +328,13 @@ export default function App() {
     }
   };
 
-  // 管理员删除用户 (满足需求 1)
   const adminDeleteUser = async (targetUserId) => {
     if (window.confirm("危险操作：确定要删除该用户吗？该操作不可恢复，且会删除关联的邀请码。")) {
        try {
          const res = await fetch(`/api/admin/users?id=${targetUserId}`, { method: 'DELETE' });
          if (res.ok) {
            showToast("用户已删除");
-           fetchCloudData(); // 刷新列表
+           fetchCloudData(); 
          } else {
            showToast("删除失败");
          }
@@ -333,6 +359,16 @@ export default function App() {
       navigator.clipboard.writeText(text);
       showToast("已复制到剪贴板 📋");
     }
+  };
+
+  // --- 新增：处理打开商店逻辑 ---
+  const handleOpenStore = () => {
+    if (!loggedInUser) {
+      showToast("请先登录才能使用商店功能 🔒");
+      setShowLoginModal(true);
+      return;
+    }
+    setShowStoreModal(true);
   };
 
   // --- Existing Logic ---
@@ -648,7 +684,8 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-2">
-          <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full border cursor-pointer hover:scale-105 transition-transform ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white/80 border-gray-200 shadow-sm'}`} onClick={() => setShowStoreModal(true)}>
+          {/* 这里的 onClick 修改为 handleOpenStore */}
+          <div className={`flex items-center gap-1 px-3 py-1.5 rounded-full border cursor-pointer hover:scale-105 transition-transform ${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white/80 border-gray-200 shadow-sm'}`} onClick={handleOpenStore}>
             <Trophy className="w-4 h-4 text-yellow-400" />
             <span className="font-bold text-sm">{points}</span>
           </div>
@@ -670,7 +707,9 @@ export default function App() {
             </div>
           </div>
 
-          <button onClick={() => setShowStoreModal(true)} className={`p-2 rounded-full transition-colors ${isDark ? 'bg-slate-800/80 hover:bg-slate-700' : 'bg-white/80 hover:bg-gray-100 shadow-sm'}`}><ShoppingBag size={18} className="text-pink-400" /></button>
+          {/* 这里的 onClick 修改为 handleOpenStore */}
+          <button onClick={handleOpenStore} className={`p-2 rounded-full transition-colors ${isDark ? 'bg-slate-800/80 hover:bg-slate-700' : 'bg-white/80 hover:bg-gray-100 shadow-sm'}`}><ShoppingBag size={18} className="text-pink-400" /></button>
+          
           <button onClick={() => isAdmin ? setShowAdminPanel(true) : setShowAdminLogin(true)} className={`p-2 rounded-full transition-colors ${isAdmin ? 'bg-blue-500/20 text-blue-400' : isDark ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400' : 'bg-white/80 hover:bg-gray-100 text-gray-400 shadow-sm'}`}>{isAdmin ? <Settings size={18} /> : <Lock size={18} />}</button>
           <button onClick={() => setIsDark(!isDark)} className={`p-2 rounded-full transition-colors ${isDark ? 'bg-slate-800/80 hover:bg-slate-700' : 'bg-white/80 hover:bg-gray-100 shadow-sm'}`}>{isDark ? <Moon size={18} /> : <Sun size={18} className="text-orange-500" />}</button>
         </div>
