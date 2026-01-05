@@ -6,7 +6,7 @@ import {
   Smile, Frown, Meh, Heart, Star, MessageSquare,
   ShoppingBag, Settings, Lock, Gift, Coins, User, History, Receipt, RefreshCw,
   Camera, Edit3, Upload, Palette, Image as ImageIcon, LogOut, RotateCcw, Ticket,
-  LogIn, UserPlus, Key, Copy, Check, UserMinus
+  LogIn, UserPlus, Key, Copy, Check, UserMinus, Users, HelpCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -51,7 +51,6 @@ export default function App() {
     }
   });
   
-  // 核心：如果有登录用户，使用登录ID，否则使用游客ID
   const userId = loggedInUser ? loggedInUser.id : localGuestId;
   
   const [nickname, setNickname] = useState(() => loggedInUser ? loggedInUser.nickname : (localStorage.getItem('spark-nickname') || '神秘打卡人'));
@@ -76,7 +75,8 @@ export default function App() {
 
   const [storeItems, setStoreItems] = useState([]); 
   const [transactions, setTransactions] = useState([]);
-  const [inviteCodes, setInviteCodes] = useState([]); // 管理员用
+  const [inviteCodes, setInviteCodes] = useState([]); 
+  const [adminUsers, setAdminUsers] = useState([]); // 新增：管理员查看的用户列表
   const [isLoadingCloud, setIsLoadingCloud] = useState(false);
   
   const [showAddModal, setShowAddModal] = useState(false);
@@ -89,9 +89,10 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false); // 新增：忘记密码弹窗
   
   // Auth Form State
-  const [authForm, setAuthForm] = useState({ username: '', password: '', nickname: '', inviteCode: '' });
+  const [authForm, setAuthForm] = useState({ username: '', password: '', nickname: '', inviteCode: '', newPassword: '' });
   const [deletePassword, setDeletePassword] = useState("");
 
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -122,13 +123,11 @@ export default function App() {
   }, [transactions, userId]);
 
   useEffect(() => {
-    // 同步登录用户信息
     if (loggedInUser) {
       setNickname(loggedInUser.nickname);
       setAvatar(loggedInUser.avatar);
       localStorage.setItem('spark-user-session', JSON.stringify(loggedInUser));
     } else {
-      // 登出或游客状态
       localStorage.removeItem('spark-user-session');
     }
   }, [loggedInUser]);
@@ -137,7 +136,6 @@ export default function App() {
     try {
       localStorage.setItem('spark-habits', JSON.stringify(habits));
       localStorage.setItem('spark-points', points.toString());
-      // 仅在游客模式下保存昵称到本地，登录模式由 user 对象管理，但为了兼容保持写入
       localStorage.setItem('spark-nickname', nickname);
       localStorage.setItem('spark-avatar', avatar);
       localStorage.setItem('spark-last-point-date', lastPointDate);
@@ -156,11 +154,14 @@ export default function App() {
       const transRes = await fetch('/api/transact', { cache: 'no-store' });
       if (transRes.ok) setTransactions(await transRes.json());
       
-      // 如果是管理员，获取邀请码
-      // 修复：修改API路径为 /api/codes
       if (isAdmin) {
+        // 获取邀请码
         const codesRes = await fetch('/api/codes', { cache: 'no-store' });
         if (codesRes.ok) setInviteCodes(await codesRes.json());
+        
+        // 获取用户列表 (新增)
+        const usersRes = await fetch('/api/admin/users', { cache: 'no-store' });
+        if (usersRes.ok) setAdminUsers(await usersRes.json());
       }
     } catch (e) {
       // ignore
@@ -202,7 +203,7 @@ export default function App() {
         setLoggedInUser(data.user);
         setShowRegisterModal(false);
         showToast("注册成功，欢迎加入！🎉");
-        setAuthForm({ username: '', password: '', nickname: '', inviteCode: '' });
+        setAuthForm({ username: '', password: '', nickname: '', inviteCode: '', newPassword: '' });
       } else {
         showToast(data.error || "注册失败");
       }
@@ -227,9 +228,39 @@ export default function App() {
         setLoggedInUser(data.user);
         setShowLoginModal(false);
         showToast("登录成功！👋");
-        setAuthForm({ username: '', password: '', nickname: '', inviteCode: '' });
+        setAuthForm({ username: '', password: '', nickname: '', inviteCode: '', newPassword: '' });
       } else {
-        showToast(data.error || "登录失败");
+        // 登录失败提示 (满足需求 5)
+        showToast(data.error || "用户名或密码错误 🚫");
+      }
+    } catch (e) {
+      showToast("网络错误");
+    }
+  };
+  
+  // 新增：处理找回密码
+  const handleResetPassword = async () => {
+    if (!authForm.username || !authForm.inviteCode || !authForm.newPassword) {
+      showToast("请填写所有信息");
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/reset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ 
+          username: authForm.username, 
+          inviteCode: authForm.inviteCode, 
+          newPassword: authForm.newPassword 
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShowForgotModal(false);
+        showToast("密码重置成功，请重新登录 ✨");
+        setAuthForm({ username: '', password: '', nickname: '', inviteCode: '', newPassword: '' });
+      } else {
+        showToast(data.error || "验证失败");
       }
     } catch (e) {
       showToast("网络错误");
@@ -261,7 +292,7 @@ export default function App() {
         setShowDeleteAccountModal(false);
         setShowProfileModal(false);
         setDeletePassword("");
-        showToast("账号已注销，有缘再会 👋");
+        showToast("账号已注销，邀请码已失效 👋");
       } else {
         showToast(data.error || "注销失败");
       }
@@ -270,9 +301,25 @@ export default function App() {
     }
   };
 
+  // 管理员删除用户 (满足需求 1)
+  const adminDeleteUser = async (targetUserId) => {
+    if (window.confirm("危险操作：确定要删除该用户吗？该操作不可恢复，且会删除关联的邀请码。")) {
+       try {
+         const res = await fetch(`/api/admin/users?id=${targetUserId}`, { method: 'DELETE' });
+         if (res.ok) {
+           showToast("用户已删除");
+           fetchCloudData(); // 刷新列表
+         } else {
+           showToast("删除失败");
+         }
+       } catch (e) {
+         showToast("网络错误");
+       }
+    }
+  };
+
   const generateInviteCode = async () => {
      try {
-       // 修复：修改API路径为 /api/codes
        const res = await fetch('/api/codes', { method: 'POST' });
        if (res.ok) {
          fetchCloudData();
@@ -851,6 +898,36 @@ export default function App() {
                    <input value={authForm.username} onChange={e => setAuthForm({...authForm, username: e.target.value})} className={`w-full p-3 rounded-xl outline-none border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`} placeholder="用户名" />
                    <input type="password" value={authForm.password} onChange={e => setAuthForm({...authForm, password: e.target.value})} className={`w-full p-3 rounded-xl outline-none border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`} placeholder="密码" />
                    <button onClick={handleLogin} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold mt-2">登录</button>
+                   {/* 找回密码入口 */}
+                   <button 
+                     onClick={() => { setShowLoginModal(false); setShowForgotModal(true); }}
+                     className="w-full text-xs text-blue-400 hover:underline"
+                   >
+                     忘记密码？
+                   </button>
+                </div>
+             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 找回密码弹窗 (新增) */}
+      <AnimatePresence>
+        {showForgotModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
+             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowForgotModal(false)} />
+             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9, y: 50 }} className={`relative w-full max-w-xs ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3 text-blue-500">
+                  <HelpCircle size={24} />
+                </div>
+                <h3 className="text-lg font-bold mb-4 text-center">找回密码</h3>
+                <p className={`text-xs ${subTextClass} text-center mb-4`}>使用注册时的邀请码验证身份并重置密码</p>
+                <div className="space-y-3">
+                   <input value={authForm.username} onChange={e => setAuthForm({...authForm, username: e.target.value})} className={`w-full p-3 rounded-xl outline-none border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`} placeholder="用户名" />
+                   <input value={authForm.inviteCode} onChange={e => setAuthForm({...authForm, inviteCode: e.target.value})} className={`w-full p-3 rounded-xl outline-none border text-center tracking-widest ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`} placeholder="邀请码" />
+                   <input type="password" value={authForm.newPassword} onChange={e => setAuthForm({...authForm, newPassword: e.target.value})} className={`w-full p-3 rounded-xl outline-none border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-gray-50 border-gray-200'}`} placeholder="设置新密码" />
+                   <button onClick={handleResetPassword} className="w-full bg-blue-500 text-white py-3 rounded-xl font-bold mt-2">重置密码</button>
+                   <button onClick={() => { setShowForgotModal(false); setShowLoginModal(true); }} className="w-full text-xs opacity-60 hover:opacity-100 mt-2">返回登录</button>
                 </div>
              </motion.div>
           </motion.div>
@@ -963,7 +1040,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* 管理员后台 (Updated with Code Management) */}
+      {/* 管理员后台 (Updated with User Management) */}
       <AnimatePresence>
         {showAdminPanel && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -978,6 +1055,26 @@ export default function App() {
               </div>
               <div className="flex-1 overflow-y-auto space-y-6 pr-2">
                 
+                {/* 用户管理 (新增) */}
+                <section>
+                  <h3 className="text-sm font-bold mb-3 flex items-center gap-2 text-blue-400"><Users size={14} /> 用户管理</h3>
+                  <div className={`rounded-xl p-3 max-h-40 overflow-y-auto space-y-2 ${isDark ? 'bg-slate-900/50' : 'bg-gray-50'}`}>
+                    {adminUsers.map(u => (
+                      <div key={u.id} className="flex justify-between items-center text-[10px] py-1 border-b border-white/5 last:border-0">
+                         <div className="flex items-center gap-2">
+                            <AvatarDisplay src={u.avatar} size="sm" />
+                            <div className="flex flex-col">
+                               <span className="font-bold">{u.nickname}</span>
+                               <span className="opacity-60 text-[9px] font-mono">@{u.username}</span>
+                            </div>
+                         </div>
+                         <button onClick={() => adminDeleteUser(u.id)} className="text-red-500 hover:text-red-400 p-1"><Trash2 size={12} /></button>
+                      </div>
+                    ))}
+                    {adminUsers.length === 0 && <p className="text-[10px] text-center opacity-50">暂无用户</p>}
+                  </div>
+                </section>
+
                 {/* 邀请码管理 */}
                 <section>
                   <h3 className="text-sm font-bold mb-3 flex items-center gap-2 text-green-400"><Key size={14} /> 注册邀请码管理</h3>
@@ -1059,7 +1156,18 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-      <AnimatePresence>{toast && <motion.div initial={{ opacity: 0, y: 50 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="fixed top-20 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur text-slate-900 px-6 py-3 rounded-full shadow-2xl font-bold z-[60] text-sm whitespace-nowrap">{toast}</motion.div>}</AnimatePresence>
+      <AnimatePresence>
+        {toast && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50, x: "-50%" }} 
+            animate={{ opacity: 1, y: 0, x: "-50%" }} 
+            exit={{ opacity: 0, y: -50, x: "-50%" }} 
+            className="fixed top-20 left-1/2 bg-white/90 backdrop-blur text-slate-900 px-6 py-3 rounded-full shadow-2xl font-bold z-[60] text-sm whitespace-nowrap"
+          >
+            {toast}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
